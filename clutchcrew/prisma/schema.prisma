@@ -2,20 +2,185 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-    provider = "prisma-client-js"
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-//   directUrl = env("DIRECT_URL")
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  // directUrl = env("DIRECT_URL")
 }
 
-model Post {
-    id        Int      @id @default(autoincrement())
-    name      String
-    createdAt DateTime @default(now())
-    updatedAt DateTime @updatedAt
+// User model - core user information and authentication
+model User {
+  id            String    @id @default(cuid())
+  username      String    @unique
+  email         String    @unique
+  password      String    // Hashed password
+  displayName   String?
+  bio           String?   @db.Text
+  avatar        String?   // URL to avatar image
+  region        String?   // Geographic region for matchmaking
+  language      String[]  // Preferred languages for communication
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  lastActive    DateTime  @default(now())
+  
+  // Relations
+  accounts      Account[]
+  sessions      Session[]
+  gameStats     GameStat[]
+  sentMatches   Match[]   @relation("Requester")
+  receivedMatches Match[] @relation("Recipient")
+  sentMessages  Message[] @relation("Sender")
+  receivedMessages Message[] @relation("Recipient")
+  
+  @@index([username])
+  @@index([email])
+}
 
-    @@index([name])
+// Account model - for OAuth providers (Better Auth)
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+// Session model - for managing user sessions
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId])
+}
+
+// Game model - information about supported games
+model Game {
+  id          String     @id @default(cuid())
+  name        String     @unique
+  slug        String     @unique
+  description String?    @db.Text
+  coverImage  String?    // URL to game cover image
+  genres      String[]   // Array of game genres
+  platforms   String[]   // Supported platforms
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  
+  // Relations
+  gameStats   GameStat[]
+  
+  @@index([slug])
+}
+
+// GameStat model - user stats for a specific game
+model GameStat {
+  id          String   @id @default(cuid())
+  userId      String
+  gameId      String
+  skillLevel  Float    // Numeric skill rating
+  rank        String?  // In-game rank if applicable
+  matchesPlayed Int    @default(0)
+  wins        Int     @default(0)
+  losses      Int     @default(0)
+  playtime    Int     @default(0) // In minutes
+  visibility  Visibility @default(PUBLIC)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Custom stats stored as JSON
+  customStats Json?
+  
+  // Relations
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  game        Game    @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, gameId])
+  @@index([userId])
+  @@index([gameId])
+  @@index([skillLevel]) // For efficient matchmaking queries
+}
+
+// Match model - represents a match between two players
+model Match {
+  id            String       @id @default(cuid())
+  requesterId   String
+  recipientId   String
+  gameId        String?      // Optional - specific game this match is for
+  status        MatchStatus  @default(PENDING)
+  message       String?      @db.Text
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  
+  // Relations
+  requester     User         @relation("Requester", fields: [requesterId], references: [id])
+  recipient     User         @relation("Recipient", fields: [recipientId], references: [id])
+  messages      Message[]
+  
+  @@index([requesterId])
+  @@index([recipientId])
+  @@index([status])
+}
+
+// Message model - for chat functionality
+model Message {
+  id          String    @id @default(cuid())
+  matchId     String
+  senderId    String
+  recipientId String
+  content     String    @db.Text
+  read        Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  
+  // Relations
+  match       Match     @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  sender      User      @relation("Sender", fields: [senderId], references: [id], onDelete: Cascade)
+  recipient   User      @relation("Recipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  
+  @@index([matchId])
+  @@index([senderId])
+  @@index([recipientId])
+  @@index([createdAt])
+}
+
+// UserOnlineStatus - tracks user online status for Socket.io integration
+model UserOnlineStatus {
+  id            String    @id @default(cuid())
+  userId        String    @unique
+  socketId      String?
+  isOnline      Boolean   @default(false)
+  lastPing      DateTime  @default(now())
+  
+  @@index([isOnline])
+}
+
+// Enum for match status
+enum MatchStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  BLOCKED
+}
+
+// Enum for stat visibility
+enum Visibility {
+  PUBLIC
+  FRIENDS_ONLY
+  PRIVATE
 }
